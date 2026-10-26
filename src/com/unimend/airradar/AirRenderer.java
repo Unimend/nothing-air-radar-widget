@@ -14,37 +14,37 @@ final class AirRenderer {
     private void text(String v,float x,float y,float size,int color,Typeface face) { paint.setTypeface(face); paint.setTextSize(size); paint.setColor(color); paint.setStyle(Paint.Style.FILL); paint.setStrokeWidth(1); Rect r=new Rect(); paint.getTextBounds(v,0,v.length(),r); canvas.drawText(v,x-(r.left+r.right)/2f,y-(r.top+r.bottom)/2f,paint); }
     private void draw(AirStore s,int page,boolean feedback,int frame) {
         JSONObject d=s.data(); boolean valid=d.has("aqi");
-        if(!s.configured()) { radar(new JSONObject(),-1,"AIR",WHITE); text("点击选择城市",246,476,30,GREY,zpix); pages(page,feedback); return; }
-        if(!valid) { radar(new JSONObject(),frame,"--",WHITE); text(s.city()+" · "+(s.loading()?"更新中":s.hasError()?"重试":"等待"),246,476,30,s.hasError()?RED:WHITE,zpix); pages(page,feedback); return; }
+        if(!s.configured()) { radar(new JSONObject(),-1,"AIR",WHITE); text("点击选择城市",246,476,30,GREY,zpix); return; }
+        if(!valid) { radar(new JSONObject(),frame,"--",WHITE); text(s.city()+" · "+(s.loading()?"更新中":s.hasError()?"重试":"等待"),246,476,30,s.hasError()?RED:WHITE,zpix); return; }
         if(page==0) home(s,d,frame); else forecast(s,d,frame);
-        pages(page,feedback);
     }
     private void home(AirStore s,JSONObject d,int frame) {
-        double aqi=d.optDouble("aqi"); int color=aqi<=50?Color.rgb(59,191,111):aqi<=100?AMBER:RED;
-        text("AQI "+(int)Math.round(aqi),116,58,44,color,doto);
-        text(s.city()+" · "+AirSource.level(aqi),332,58,32,WHITE,zpix);
-        bars(d,frame);
-        text("主导 "+AirSource.dominant(d),246,458,40,RED,zpix);
+        double aqi=d.optDouble("aqi"); int color=s.stale(d)?GREY:aqi>100?RED:WHITE;
+        segmentedRing(d,frame);
+        text("AQI",246,202,42,GREY,doto);
+        text(Integer.toString((int)Math.round(aqi)),246,274,108,color,doto);
+        text(AirSource.level(aqi),246,351,44,color,zpix);
     }
-    private void bars(JSONObject d,int frame) {
-        String[] labels={"PM25","PM10","O3","NO2"};
-        String[] raw={"pm25","pm10","o3","no2"};
-        String[] indices={"pm25i","pm10i","o3i","no2i"};
-        float[] centers={75,185,295,405}; float top=102,bottom=276,barWidth=52,gap=5; int segments=10; float segment=(bottom-top-gap*(segments-1))/segments;
+    private void segmentedRing(JSONObject d,int frame) {
+        String[] labels={"PM25","PM10","O3","NO2"}; String[] raw={"pm25","pm10","o3","no2"}; String[] indices={"pm25i","pm10i","o3i","no2i"};
+        // Side labels share the same 48-unit safe boundary after glyph-width correction.
+        float[][] anchors={{246,52},{416,256},{246,460},{76,256}};
+        float cx=246,cy=256,r=169; int ticks=9; String dominant=AirSource.dominant(d);
+        paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(2.5f); paint.setColor(Color.rgb(40,40,40)); canvas.drawCircle(cx,cy,r-18,paint);
         for(int i=0;i<4;i++) {
-            double index=d.optDouble(indices[i]); int filled=(int)Math.ceil(Math.min(200,index)/200.0*segments);
+            double index=d.optDouble(indices[i]); int filled=(int)Math.ceil(Math.min(200,index)/200.0*ticks);
             if(frame>=0) filled=Math.min(filled,(int)Math.ceil(filled*(frame+1)/8.0));
-            int color=index<=50?Color.rgb(59,191,111):index<=100?AMBER:RED;
-            for(int row=0;row<segments;row++) {
-                float y=bottom-(row+1)*segment-row*gap;
-                paint.setStyle(Paint.Style.FILL); paint.setColor(row<filled?color:Color.rgb(34,34,34));
-                canvas.drawRoundRect(centers[i]-barWidth/2,y,centers[i]+barWidth/2,y+segment,4,4,paint);
+            boolean primary=(i==0&&"PM2.5".equals(dominant))||(i==1&&"PM10".equals(dominant))||(i==2&&"O₃".equals(dominant))||(i==3&&"NO₂".equals(dominant));
+            int color=primary?RED:Color.rgb(225,225,225); double sectorStart=-125+i*90;
+            for(int n=0;n<ticks;n++) {
+                double degrees=sectorStart+n*(70.0/(ticks-1)); double a=Math.toRadians(degrees); float x=cx+(float)Math.cos(a)*r,y=cy+(float)Math.sin(a)*r;
+                canvas.save(); canvas.rotate((float)degrees+90,x,y); paint.setStyle(Paint.Style.FILL); paint.setColor(n<filled?color:Color.rgb(39,39,39));
+                canvas.drawRoundRect(x-10,y-6.5f,x+10,y+6.5f,2.5f,2.5f,paint); canvas.restore();
             }
-            text(labels[i],centers[i],318,34,WHITE,doto);
-            double value=d.optDouble(raw[i]); String shown=value<100?String.format(Locale.US,"%.1f",value):String.format(Locale.US,"%.0f",value);
-            text(shown,centers[i],366,38,color,doto);
+            text(labels[i],anchors[i][0],anchors[i][1],38,primary?RED:WHITE,doto);
         }
-        text("μg/m³",246,411,29,GREY,zpix);
+        paint.setStyle(Paint.Style.FILL); paint.setColor(Color.BLACK); canvas.drawCircle(cx,cy,119,paint);
+        paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(2.5f); paint.setColor(Color.rgb(43,43,43)); canvas.drawCircle(cx,cy,119,paint);
     }
     private void radar(JSONObject d,int frame,String center,int centerColor) {
         float cx=246,cy=242,r=140; paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(3.5f);
@@ -76,6 +76,5 @@ final class AirRenderer {
         text("主导 "+AirSource.dominant(d),246,459,40,s.stale(d)?AMBER:RED,zpix);
     }
     private void circleDots(float cx,float cy,float r,int count) { paint.setStyle(Paint.Style.FILL); for(int i=0;i<count;i++){double a=i*Math.PI*2/count;canvas.drawCircle(cx+(float)Math.cos(a)*r,cy+(float)Math.sin(a)*r,3.1f,paint);} }
-    private void pages(int page,boolean feedback) { for(int i=0;i<2;i++){paint.setColor(i==page?(feedback?RED:WHITE):Color.rgb(60,60,60));canvas.drawCircle(466,224+i*28,6,paint);} }
     private String time(long ms) { if(ms<=0)return "--:--"; SimpleDateFormat f=new SimpleDateFormat("HH:mm",Locale.US); return f.format(new Date(ms)); }
 }

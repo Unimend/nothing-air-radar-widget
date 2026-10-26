@@ -1,6 +1,7 @@
 package com.unimend.airradar;
 
 import android.app.PendingIntent;
+import android.app.AlarmManager;
 import android.app.job.*;
 import android.appwidget.*;
 import android.content.*;
@@ -12,6 +13,8 @@ import android.widget.RemoteViews;
 public class AirWidget extends AppWidgetProvider {
     static final String TOGGLE="com.unimend.airradar.TOGGLE", REFRESH="com.unimend.airradar.REFRESH";
     static final int PERIODIC=701, ONCE=702;
+    static final int ALARM_REQUEST=703;
+    static final long REFRESH_INTERVAL=30*60*1000L;
     private static final android.util.SparseIntArray animations=new android.util.SparseIntArray();
     static int[] ids(Context c) { return AppWidgetManager.getInstance(c).getAppWidgetIds(new ComponentName(c,AirWidget.class)); }
     static void publish(Context c) { for(int id:ids(c)) draw(c,id,false); }
@@ -54,11 +57,13 @@ public class AirWidget extends AppWidgetProvider {
     static void publishAnimated(Context c) { for(int id:ids(c)) animate(c,id); }
     static void schedule(Context c,boolean immediate) {
         JobScheduler jobs=(JobScheduler)c.getSystemService(Context.JOB_SCHEDULER_SERVICE);
-        if(ids(c).length==0) { jobs.cancel(PERIODIC); }
+        if(ids(c).length==0) { jobs.cancel(PERIODIC); cancelAlarm(c); }
         else if(jobs.getPendingJob(PERIODIC)==null) {
             jobs.schedule(new JobInfo.Builder(PERIODIC,new ComponentName(c,AirJob.class))
-                .setPeriodic(30*60*1000L,5*60*1000L).setPersisted(true).build());
+                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                .setPeriodic(REFRESH_INTERVAL,5*60*1000L).setPersisted(true).build());
         }
+        if(ids(c).length>0) scheduleAlarm(c);
         boolean configured=false; for(int id:ids(c)) if(new AirStore(c,id).configured()) configured=true;
         if(immediate && configured) {
             jobs.schedule(new JobInfo.Builder(ONCE,new ComponentName(c,AirJob.class))
@@ -70,6 +75,19 @@ public class AirWidget extends AppWidgetProvider {
     @Override public void onDeleted(Context c,int[] ids) { for(int id:ids) new AirStore(c,id).delete(); }
     @Override public void onDisabled(Context c) {
         JobScheduler j=(JobScheduler)c.getSystemService(Context.JOB_SCHEDULER_SERVICE); j.cancel(PERIODIC); j.cancel(ONCE);
+        cancelAlarm(c);
+    }
+    private static PendingIntent alarmIntent(Context c) {
+        Intent refresh=new Intent(c,AirWidget.class).setAction(REFRESH);
+        return PendingIntent.getBroadcast(c,ALARM_REQUEST,refresh,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+    private static void scheduleAlarm(Context c) {
+        AlarmManager alarm=(AlarmManager)c.getSystemService(Context.ALARM_SERVICE);
+        long first=System.currentTimeMillis()+REFRESH_INTERVAL;
+        alarm.setInexactRepeating(AlarmManager.RTC_WAKEUP,first,REFRESH_INTERVAL,alarmIntent(c));
+    }
+    private static void cancelAlarm(Context c) {
+        ((AlarmManager)c.getSystemService(Context.ALARM_SERVICE)).cancel(alarmIntent(c));
     }
     @Override public void onReceive(Context c,Intent intent) {
         super.onReceive(c,intent); String action=intent.getAction();
